@@ -92,7 +92,7 @@ function FindProxyForURL(url, host) {
 
     if (shExpMatch(host, "*.minismartfactory.com") ||
         shExpMatch(host, "*//10.*")) {
-        return "SOCKS5 hvanniek.ie:8080";
+        return "SOCKS5 mypublicserver:8080";
     }
 
     // All other traffic goes direct (no proxy)
