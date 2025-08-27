@@ -33,7 +33,7 @@ This repository contains a container image for **wstunnel** that supports:
 This example starts the `wstunnel` server using **TLS** on port **8180** and exposes a **SOCKS5 proxy** on port **8080** once a client connects. Ports must be accessible from outside.
 
 ```bash
-podman run -d \
+podman run -d --name wstunnel-server \
   -e WSTUNNEL_MODE=server \
   -e WSTUNNEL_TLS_ENABLE=true \
   -e WSTUNNEL_SOCKS5_PORT=8080 \
