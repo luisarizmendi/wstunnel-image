@@ -1,47 +1,55 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-# Start SOCKS5 proxy if port is defined and mode is client
-if [ "$WSTUNNEL_MODE" = "client" ] && [ -n "$SOCKS5_PORT" ]; then
-    echo "Starting SOCKS5 server on port $SOCKS5_PORT..."
-    microsocks -p "$SOCKS5_PORT" &
-fi
+# Default values
+MODE="${WSTUNNEL_MODE:-client}"
+REMOTE="${WSTUNNEL_REMOTE}"
+REMOTE_FORWARD="${WSTUNNEL_REMOTE_FORWARD}"
+LOCAL_FORWARD="${WSTUNNEL_LOCAL_FORWARD}"
+PORT="${WSTUNNEL_PORT:-8000}"
+SOCKS5_PORT="${SOCKS5_PORT:-1080}"
+TLS_ENABLE="${WSTUNNEL_TLS_ENABLE:-false}"
+TLS_CERT="${WSTUNNEL_TLS_CERT:-/etc/wstunnel/server.crt}"
+TLS_KEY="${WSTUNNEL_TLS_KEY:-/etc/wstunnel/server.key}"
 
-# If command-line arguments are passed, run them directly
-if [ $# -gt 0 ]; then
-    exec wstunnel "$@"
-fi
-
-# Build wstunnel command from environment variables
-if [ "$WSTUNNEL_MODE" = "server" ]; then
-    CMD="wstunnel --server"
-    [ -n "$WSTUNNEL_PORT" ] && CMD="$CMD :$WSTUNNEL_PORT"
-
-elif [ "$WSTUNNEL_MODE" = "client" ]; then
-    CMD="wstunnel --client"
-
-    # Add remote URL
-    [ -n "$WSTUNNEL_REMOTE" ] && CMD="$CMD $WSTUNNEL_REMOTE"
-
-    # Add remote forwards (-R)
-    if [ -n "$WSTUNNEL_REMOTE_FORWARD" ]; then
-        IFS=',' read -ra FORWARDS <<< "$WSTUNNEL_REMOTE_FORWARD"
-        for f in "${FORWARDS[@]}"; do
-            CMD="$CMD -R $f"
-        done
+# TLS options
+TLS_ARGS=""
+if [[ "$TLS_ENABLE" == "true" ]]; then
+    if [[ ! -f "$TLS_CERT" || ! -f "$TLS_KEY" ]]; then
+        echo "Generating self-signed certificate for TLS..."
+        mkdir -p "$(dirname "$TLS_CERT")"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$TLS_KEY" -out "$TLS_CERT" \
+            -subj "/CN=localhost"
     fi
-
-    # Add local forwards (-L)
-    if [ -n "$WSTUNNEL_LOCAL_FORWARD" ]; then
-        IFS=',' read -ra LFORWARDS <<< "$WSTUNNEL_LOCAL_FORWARD"
-        for f in "${LFORWARDS[@]}"; do
-            CMD="$CMD -L $f"
-        done
-    fi
-else
-    echo "Invalid WSTUNNEL_MODE: $WSTUNNEL_MODE"
-    exit 1
+    TLS_ARGS="--cert $TLS_CERT --key $TLS_KEY"
 fi
 
-echo "Running: $CMD"
-exec bash -c "$CMD"
+# Run in the desired mode
+case "$MODE" in
+    server)
+        echo "Starting wstunnel server on port $PORT..."
+        exec wstunnel server -l "0.0.0.0:$PORT" $TLS_ARGS
+        ;;
+    client)
+        if [[ -n "$REMOTE_FORWARD" ]]; then
+            echo "Starting wstunnel client with remote forward: $REMOTE_FORWARD -> $REMOTE"
+            exec wstunnel client -R "$REMOTE_FORWARD" $REMOTE $TLS_ARGS
+        elif [[ -n "$LOCAL_FORWARD" ]]; then
+            echo "Starting wstunnel client with local forward: $LOCAL_FORWARD -> $REMOTE"
+            exec wstunnel client -L "$LOCAL_FORWARD" $REMOTE $TLS_ARGS
+        else
+            echo "No forward configuration provided. Exiting..."
+            exit 1
+        fi
+        ;;
+    socks5)
+        echo "Starting SOCKS5 proxy on port $SOCKS5_PORT and tunneling to $REMOTE..."
+        microsocks -p "$SOCKS5_PORT" &
+        exec wstunnel client -R "tcp://[::]:$SOCKS5_PORT:localhost:$SOCKS5_PORT" $REMOTE $TLS_ARGS
+        ;;
+    *)
+        echo "Unknown mode: $MODE"
+        exit 1
+        ;;
+esac
